@@ -1,0 +1,653 @@
+ from keras.datasets import cifar10
+import numpy as np
+import pandas as pd
+from scipy.linalg import eigh
+import matplotlib.pyplot as plt
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+Downloading data from https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz 170500096/170498071 [==============================] - 2s 0us/step
+x_train = x_train.reshape(-1,32*32*3) x_test = x_test.reshape(-1,32*32*3)
+print('Traning data shape:', x_train.shape) print('Testing data shape:', x_test.shape)
+     Traning data shape: (50000, 3072)
+     Testing data shape: (10000, 3072)
+Standardization
+def standardization(dataset):
+return (dataset - np.average(dataset)) / np.std(dataset)
+x_train = standardization(x_train) x_test = standardization(x_test)
+ 
+ PCA
+def PCA(sample_data , ndim):
+nfeatures = sample_data.shape[1]
+covar_matrix = np.matmul(sample_data.T , sample_data) values, vectors = eigh(covar_matrix)
+values = values[::-1]/np.sum(values)
+values = values[:ndim]
+vectors = np.flip(vectors, axis=1)
+vectors = vectors[:,:ndim]
+vectors = vectors.T
+new_coordinates = np.matmul(sample_data, vectors.T) return values, new_coordinates
+ndim = 150
+x_train_explained_variance_ratio, x_train = PCA(x_train, ndim) x_test_explained_variance_ratio, x_test = PCA(x_test, ndim)
+print('Traning data shape:', x_train.shape) print('Testing data shape:', x_test.shape)
+     Traning data shape: (50000, 150)
+     Testing data shape: (10000, 150)
+
+ plt.plot(x_train_explained_variance_ratio) plt.title('Variance graph') plt.xlabel("Dimensions") plt.ylabel("Explained variance ratio")
+Text(0, 0.5, 'Explained variance ratio')
+ SVM with PCA (150 components)
+
+ def
+svm_loss_vectorized(W,X,y,reg): loss = 0.0
+dW = np.zeros(W.shape) num_train = X.shape[0]
+s = X.dot(W)
+correct_score = s[list(range(num_train)),y] correct_score = correct_score.reshape(num_train,-1) s += 1-correct_score
+s[list(range(num_train)),y] = 0
+loss = np.sum(np.fmax(s,0))/num_train loss += reg * np.sum(W * W)
+#Now calculating the gradient.
+X_mask = np.zeros(s.shape)
+X_mask[ s > 0] = 1
+X_mask[np.arange(num_train),y] = -np.sum(X_mask,axis = 1) dW = X.T.dot(X_mask)
+dW = dW / num_train
+dW += 2 * reg * W
+return loss,dW
+class LinearClassifier(object): def __init__(self):
+self.W = None
+def train(self,X,y,learning_rate=1e-3,reg=1e-5,num_iters=100,batch_size=200,
+             verbose=False):
+num_train,dim = X.shape num_classes = np.max(y)+1 if self.W is None:
+
+ self.W = 0.001*np.random.randn(dim,num_classes) #Intialte the SGD
+loss_history = []
+for it in range(num_iters):
+            x_batch = None
+            y_batch = None
+sample_indices = np.random.choice(np.arange(num_train),batch_size) x_batch = X[sample_indices]
+y_batch = y[sample_indices]
+#Finding the loss and computing the gradient loss,grad = self.loss(x_batch,y_batch,reg) loss_history.append(loss)
+#Updating the weights based on the gradient self.W += -learning_rate * grad
+            #Printing the loss over verbose, to have a track
+            if verbose and it%100 == 0:
+print(f'iteration {it} / {num_iters}: loss {loss}') return loss_history
+def loss(self,X_batch,y_batch,reg): pass
+def predict(self,X):
+y_pred = np.zeros(X.shape[0]) scores = X.dot(self.W)
+y_pred = np.argmax(scores,axis=1) return y_pred
+class LinearSVM(LinearClassifier):
+def loss(self,X_batch,y_batch,reg):
+return svm_loss_vectorized(self.W,X_batch,y_batch,reg)
+
+ def F1_score(y_train, y_pred): TP = 0
+FP = 0
+for ind in range(len(y_train)):
+if y_train_pred[ind] == y_train[ind]: TP += 1
+else:
+FP += 1
+  Precision = TP/(TP+FP)
+  F1 = 2*Precision/(Precision + 1)
+  return F1
+X_train_bias = np.hstack([x_train, np.ones((x_train.shape[0], 1))]) X_test_bias = np.hstack([x_test, np.ones((x_test.shape[0], 1))]) print(X_train_bias.shape, X_test_bias.shape)
+     (50000, 151) (10000, 151)
+X_val = x_train[49000:50000]
+y_val = y_train[49000:50000]
+X_val_reshape = np.reshape(X_val, (X_val.shape[0], -1))
+X_val_bias = np.hstack([X_val_reshape, np.ones((X_val_reshape.shape[0], 1))]) y_val_reshape = y_val.reshape((1000,))
+print(X_val_bias.shape, y_val_reshape.shape)
+(1000, 151) (1000,) y_train = y_train.reshape(-1,)
+learning_rates = [1e-8, 1e-7, 2e-7] regularization_strengths = [2.5e4, 5e4]
+
+ results = {} best_val = -1
+best_svm = None
+svm = LinearSVM()
+for lr in learning_rates:
+for
+reg in regularization_strengths:
+loss_hist = svm.train(X_train_bias, y_train, learning_rate=lr, reg=reg, num_iters=1500)
+y_train_pred = svm.predict(X_train_bias) acc_train = np.mean(y_train == y_train_pred)
+y_val_pred = svm.predict(X_val_bias)
+acc_val = np.mean(y_val_reshape == y_val_pred)
+results[(lr, reg)] = (acc_train, acc_val)
+if acc_val > best_val: best_val = acc_val best_svm = svm
+# Print
+for lr, reg in sorted(results):
+train_accuracy, val_accuracy = results[(lr, reg)]
+print('lr %e reg %e train accuracy: %f val accuracy: %f' % (
+lr, reg, train_accuracy, val_accuracy))
+print('best validation accuracy achieved during cross-validation: %f' % best_val)
+out results.
+
+ lr 1.000000e-08 reg 2.500000e+04 train accuracy: 0.090440 val accuracy: 0.084000 lr 1.000000e-08 reg 5.000000e+04 train accuracy: 0.129360 val accuracy: 0.140000 lr 1.000000e-07 reg 2.500000e+04 train accuracy: 0.242220 val accuracy: 0.251000 lr 1.000000e-07 reg 5.000000e+04 train accuracy: 0.241420 val accuracy: 0.257000 lr 2.000000e-07 reg 2.500000e+04 train accuracy: 0.244940 val accuracy: 0.258000 lr 2.000000e-07 reg 5.000000e+04 train accuracy: 0.246520 val accuracy: 0.256000 best validation accuracy achieved during cross-validation: 0.258000
+svm = LinearSVM()
+loss_hist = svm.train(X_train_bias, y_train, learning_rate=1e-8, reg=5e4, num_iters=5000, verbose=True)
+iteration 0 / 5000: loss 82.63119088586782 iteration 100 / 5000: loss 69.1572087030528 iteration 200 / 5000: loss 58.33822818088986 iteration 300 / 5000: loss 49.36404400323554 iteration 400 / 5000: loss 42.03646014799355 iteration 500 / 5000: loss 36.07513992191396 iteration 600 / 5000: loss 31.152480342186365 iteration 700 / 5000: loss 27.120256313489136 iteration 800 / 5000: loss 23.82633903326237 iteration 900 / 5000: loss 21.146034244867586 iteration 1000 / 5000: loss 18.95432369548127 iteration 1100 / 5000: loss 17.144625898922115 iteration 1200 / 5000: loss 15.65311693364169 iteration 1300 / 5000: loss 14.44158624958115 iteration 1400 / 5000: loss 13.466903693056096 iteration 1500 / 5000: loss 12.65970183996463 iteration 1600 / 5000: loss 11.978990863309916 iteration 1700 / 5000: loss 11.442899408102713 iteration 1800 / 5000: loss 10.991400741243705 iteration 1900 / 5000: loss 10.634365030598563 iteration 2000 / 5000: loss 10.335829501593267 iteration 2100 / 5000: loss 10.084173510800708 iteration 2200 / 5000: loss 9.893827162635244 iteration 2300 / 5000: loss 9.729181763564645 iteration 2400 / 5000: loss 9.588831897823345 iteration 2500 / 5000: loss 9.484486643889811 iteration 2600 / 5000: loss 9.390767125849438
+
+iteration 2600 / 5000: loss 9.390767125849438
+ iteration 2700 / 5000: loss 9.318759540423937 iteration 2800 / 5000: loss 9.265074236030172 iteration 2900 / 5000: loss 9.212290392653626 iteration 3000 / 5000: loss 9.169274976941931 iteration 3100 / 5000: loss 9.137798814314438 iteration 3200 / 5000: loss 9.113399318140583 iteration 3300 / 5000: loss 9.087295083001791 iteration 3400 / 5000: loss 9.073980636682599 iteration 3500 / 5000: loss 9.05712925955808 iteration 3600 / 5000: loss 9.040258667744299 iteration 3700 / 5000: loss 9.03572772198409 iteration 3800 / 5000: loss 9.023168392626763 iteration 3900 / 5000: loss 9.023692837541397 iteration 4000 / 5000: loss 9.013674285700558 iteration 4100 / 5000: loss 9.008859066523366 iteration 4200 / 5000: loss 9.003531700656659 iteration 4300 / 5000: loss 9.002302699602003 iteration 4400 / 5000: loss 8.99511044418949 iteration 4500 / 5000: loss 8.995776180992197 iteration 4600 / 5000: loss 8.996866281516763 iteration 4700 / 5000: loss 8.997909267514139 iteration 4800 / 5000: loss 8.991660308416604 iteration 4900 / 5000: loss 8.994871172571997
+
+ plt.plot(loss_hist) plt.xlabel('Iteration number') plt.ylabel('Loss value') plt.show()
+ y_test_pred = svm.predict(X_test_bias) F1_score = F1_score(y_test, y_test_pred) print(F1_score)
+0.17983254459410267
+CNN part 1 - MLP
+
+ from __future__ import print_function import matplotlib.pyplot as plt import numpy as np
+import torch
+import torchvision
+import torchvision.transforms as transforms import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
+# Training setting batch_size = 64 test_batch_size = 1000 epochs = 5
+lr = 1.0
+gamma = 0.7
+seed = 1
+log_interval = 150
+save_model = True
+use_cuda = torch.cuda.is_available() torch.manual_seed(seed)
+device = torch.device("cuda" if use_cuda else "cpu")
+
+ transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5 ,), (0.5,))])
+train_val = torchvision.datasets.CIFAR10('./', train=True, download=True, transform=transform) train, val = torch.utils.data.random_split(train_val, [40000, 10000])
+train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size, shuffle=True) val_loader = torch.utils.data.DataLoader(val, batch_size=test_batch_size, shuffle= True)
+test = torchvision.datasets.CIFAR10('./', train=False, download=True, transform=transform) test_loader = torch.utils.data.DataLoader(test, batch_size=test_batch_size, shuffle=True)
+Downloading https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz to ./cifar-10-python.tar.gz 170499072/? [00:24<00:00, 7009825.60it/s]
+Extracting ./cifar-10-python.tar.gz to ./ Files already downloaded and verified
+class Feedforward(torch.nn.Module):
+def __init__(self, input_size, hidden_size, num_class):
+super(Feedforward, self).__init__()
+self.input_size = input_size
+self.hidden_size = hidden_size
+self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size) self.relu = torch.nn.ReLU()
+self.fc2 = torch.nn.Linear(self.hidden_size, num_class)
+def forward(self, x):
+hidden = self.fc1(x)
+relu = self.relu(hidden)
+output = self.fc2(relu)
+output = F.log_softmax(output, dim=1) return output
+ 
+ model = Feedforward(32*32*3, 128, 10) model = model.to(device)
+optimizer = optim.Adadelta(model.parameters(), lr=lr) scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
+def
+train(model, device, train_loader, optimizer, epoch, log_interval): model.train()
+loss_list_per_epoch = []
+i=1
+for batch_idx, (data, target) in enumerate(train_loader):
+data, target = data.to(device), target.to(device)
+x_train = data.view(data.size()[0],32*32*3)
+# set the gradients to zero to avoid unwanted gradient accumulation optimizer.zero_grad()
+# get model prediction
+y_pred = model(x_train) criterion = torch.nn.NLLLoss() loss = criterion(y_pred, target) # perform back propagation loss.backward()
+# update parameters optimizer.step()
+if batch_idx % log_interval == 0:
+print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format( i, batch_idx * len(data), len(train_loader.dataset),
+100. * batch_idx / len(train_loader), loss.item()))
+loss_list_per_epoch.append(loss.data) return loss_list_per_epoch
+
+ def
+test(model, device, test_loader): model.eval()
+test_loss = 0
+correct = 0
+with torch.no_grad():
+for data, target in test_loader:
+data, target = data.to(device), target.to(device)
+batch_size = data.size()[0] data = data.view(batch_size, -1) y_pred = model(data)
+criterion = torch.nn.NLLLoss()
+loss = criterion(y_pred, target)
+test_loss += loss
+#number of correct predictions
+correct += np.sum(np.array(np.argmax(y_pred.cpu(),axis=1))==np.array(target.cpu()))
+test_loss /= len(test_loader.dataset)
+print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+test_loss, correct, len(test_loader.dataset),
+100. * correct / len(test_loader.dataset)))
+return test_loss, 100. * correct / len(test_loader.dataset)
+# Let's start training loss_list = [] val_accuracy_list = [] epochs = 5
+losss = []
+for epoch in range(1, epochs + 1):
+# train
+print("epoch:",epoch)
+loss_list_per_epoch = train(model, device, train_loader, optimizer, epoch, log_interval)
+
+ # inference on validation set
+validation_loss, validation_accuracy = test(model, device, val_loader) scheduler.step()
+# log loss and accuracy
+loss_list += loss_list_per_epoch val_accuracy_list.append(validation_accuracy) losss.append(validation_loss)
+if save_model:
+torch.save(model.state_dict(), "cifar10_mlp.pt")
+epoch: 1
+Train Epoch: 1 [0/40000 (0%)] Loss: 2.373016
+Train Epoch: 1 [9600/40000 (24%)]
+Train Epoch: 1 [19200/40000 (48%)]
+Train Epoch: 1 [28800/40000 (72%)]
+Train Epoch: 1 [38400/40000 (96%)]
+Loss: 1.468541 Loss: 1.821351 Loss: 1.570101 Loss: 1.855291
+Test set: Average loss: 0.0016, Accuracy: 4323/10000 (43%)
+epoch: 2
+Train Epoch: 1 [0/40000 (0%)] Loss: 1.643078
+Train Epoch: 1 [9600/40000 (24%)]
+Train Epoch: 1 [19200/40000 (48%)]
+Train Epoch: 1 [28800/40000 (72%)]
+Train Epoch: 1 [38400/40000 (96%)]
+Loss: 1.478919 Loss: 1.556736 Loss: 1.615107 Loss: 1.438211
+Test set: Average loss: 0.0015, Accuracy: 4774/10000 (48%)
+epoch: 3
+Train Epoch: 1 [0/40000 (0%)] Loss: 1.422103
+Train Epoch: 1 [9600/40000 (24%)]
+Train Epoch: 1 [19200/40000 (48%)]
+Train Epoch: 1 [28800/40000 (72%)]
+Train Epoch: 1 [38400/40000 (96%)]
+Loss: 1.322899 Loss: 1.408590 Loss: 1.264240 Loss: 1.212811
+Test set: Average loss: 0.0015, Accuracy: 4920/10000 (49%) epoch: 4
+Train Epoch: 1 [0/40000 (0%)] Loss: 1.241731
+
+Train Epoch: 1 [0/40000 (0%)] Loss: 1.241731
+ Train Epoch: 1 [9600/40000 (24%)]
+Train Epoch: 1 [19200/40000 (48%)]
+Train Epoch: 1 [28800/40000 (72%)]
+Train Epoch: 1 [38400/40000 (96%)]
+Loss: 1.225328 Loss: 1.347561 Loss: 1.289153 Loss: 1.337842
+Test set: Average loss: 0.0014, Accuracy: 5020/10000 (50%)
+epoch: 5
+Train Epoch: 1 [0/40000 (0%)] Loss: 1.027509
+Train Epoch: 1 [9600/40000 (24%)]
+Train Epoch: 1 [19200/40000 (48%)]
+Train Epoch: 1 [28800/40000 (72%)]
+Train Epoch: 1 [38400/40000 (96%)]
+Loss: 1.113699 Loss: 1.118675 Loss: 1.006913 Loss: 1.174187
+Test set: Average loss: 0.0014, Accuracy: 5185/10000 (52%)
+
+ #visualise training progress
+epochs = range(1,6)
+loss = losss
+accuracy = val_accuracy_list
+plt.plot(epochs,accuracy, color='blue',marker='o', label='Accuracy') plt.plot(epochs,loss, color='red',marker='o', label='Loss') plt.legend()
+plt.title("Loss function and accuracy through training") plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.show()
+ 
+ def F1_score(y_train, y_pred): TP = 0
+FP = 0
+TN = 0
+FN = 0
+for ind in range(len(y_train)):
+if y_pred[ind] == y_train[ind] and y_train[ind] == 1 : TP += 1
+elif y_pred[ind] != y_train[ind] and y_train[ind] == 0 : FP += 1
+elif y_pred[ind] == y_train[ind] and y_train[ind] == 0 : TN += 1
+elif y_pred[ind] != y_train[ind] and y_train[ind] == 1 : FN += 1
+  Precision = TP/(TP+FP)
+  Recall = TP/(TP+FN)
+  F1 = 2*(Precision*Recall)/(Precision + Recall)
+  return F1
+def F1_score_mod(y_train, y_pred): F1_class = []
+classes = [i for i in range(10)] for classs in classes:
+true_lab = np.where(y_train==classs, 1, 0) pred_lab = np.where(y_pred==classs, 1, 0) F1_class.append(F1_score(true_lab,pred_lab))
+return F1_class print(np.mean(np.array(F1_score_mod(b,a))))
+0.5207002672654479
+
+ def
+test1(model, device, test_loader): model.eval()
+test_loss = 0
+correct = 0
+y_preds = []
+targets = []
+with torch.no_grad():
+for data, target in test_loader:
+data, target = data.to(device), target.to(device)
+batch_size = data.size()[0] data = data.view(batch_size, -1) y_pred = model(data)
+criterion = torch.nn.NLLLoss()
+loss = criterion(y_pred, target)
+test_loss += loss
+#number of correct predictions
+correct += np.sum(np.array(np.argmax(y_pred.cpu(),axis=1))==np.array(target.cpu())) y_preds.append(np.array(np.argmax(y_pred.cpu(),axis=1))) targets.append(np.array(target.cpu()))
+test_loss /= len(test_loader.dataset)
+print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+test_loss, correct, len(test_loader.dataset),
+100. * correct / len(test_loader.dataset)))
+return test_loss, 100. * correct / len(test_loader.dataset), y_preds, targets
+validation_loss, validation_accuracy, y_pred, y_test = test1(model, device, test_loader) Test set: Average loss: 0.0014, Accuracy: 5224/10000 (52%)
+
+ pred,test = np.stack(y_pred, axis=0),np.stack(y_test, axis=0) a = pred.reshape(10000,)
+b = test.reshape(10000,)
+F1_score = F1_score(b.tolist(),a.tolist()) print(F1_score)
+0.6862848134524435
+from sklearn.metrics import f1_score f1 = f1_score(b, a, average='macro') print(f1)
+0.5207002672654479
+
+  
+ Part 1 CNN
+import torch
+import torchvision
+import torchvision.transforms as transforms import numpy as np
+import pandas as pd
+import random
+import matplotlib.pyplot as plt
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variableimport torch import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
+batch_size = 128 batch_size_test = 1000 epochs = 14
+lr = 0.01
+gamma = 0.7
+seed = 1
+log_interval = 200
+save_model = True
+use_cuda = torch.cuda.is_available() torch.manual_seed(seed)
+device = torch.device("cuda" if use_cuda else "cpu")
+Functions
+  
+ class CNN_Net(nn.Module):
+def __init__(self, do = 0.25):
+super(CNN_Net, self).__init__()
+self.conv1 = nn.Conv2d(3, 16, 3, padding = 1) self.conv2 = nn.Conv2d(16, 32, 3, padding = 1) self.conv3 = nn.Conv2d(32, 64, 3, padding=1) self.pool = nn.MaxPool2d(2, 2)
+self.fc1 = nn.Linear(64 * 4 * 4, 512) self.fc2 = nn.Linear(512, 10)
+self.do = do
+self.dropout = nn.Dropout (do)
+def forward(self, x):
+x = self.pool(F.relu(self.conv1(x))) x = self.pool(F.relu(self.conv2(x))) x = self.pool(F.relu(self.conv3(x))) x = x.view(-1, 64 * 4 * 4)
+x = self.dropout(x)
+x = F.relu(self.fc1(x))
+x = self.dropout(x)
+x = self.fc2(x)
+# output = F.log_softmax(x, dim=1) return x
+
+ def
+CNN_train(CNN_model, epoch):
+CNN_model.train()
+CNN_loss_list_per_epoch = []
+for batch_idx, (data, target) in enumerate(train_loader):
+data, target = data.to(device), target.to(device) # data = data.reshape(-1, 784).to(device) optimizer.zero_grad()
+output = CNN_model(data)
+loss = criterion(output, target) loss.backward()
+optimizer.step()
+if batch_idx % log_interval == 0:
+print('Train Epoch: {} | Batch Status: {}/{} ({:.0f}%) | Loss: {:.6f}'.format( epoch, batch_idx * len(data), len(train_loader.dataset),
+100. * batch_idx / len(train_loader), loss.item()))
+CNN_loss_list_per_epoch.append(loss.item()) return CNN_loss_list_per_epoch
+
+ def
+CNN_test(CNN_model, loader): CNN_model.eval()
+# criterion = torch.nn.CrossEntropyLoss() test_loss = 0
+correct = 0
+test_output = []
+test_target = []
+with torch.no_grad():
+for data, target in loader:
+data, target = data.to(device), target.to(device) test_target.append(target)
+output = CNN_model(data)
+# sum up batch loss
+test_loss += criterion(output, target).item()
+# get the index of the max
+pred = output.data.max(1, keepdim=True)[1] test_output.append(pred)
+correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+test_loss /= len(loader.dataset)
+accuracy = 100. * correct / len(loader.dataset)
+print('Train Epoch: {} | Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format( epoch, test_loss, correct, len(loader.dataset),
+accuracy))
+return test_loss, accuracy, test_target, test_output
+
+ def F1_score_each_class(y_train, y_pred): TP = 0
+FP = 0
+TN = 0
+FN = 0
+for ind in range(len(y_train)):
+if y_pred[ind] == y_train[ind] and y_train[ind] == 1 : TP += 1
+elif y_pred[ind] != y_train[ind] and y_train[ind] == 0 : FP += 1
+elif y_pred[ind] == y_train[ind] and y_train[ind] == 0 : TN += 1
+elif y_pred[ind] != y_train[ind] and y_train[ind] == 1 : FN += 1
+  Precision = TP/(TP+FP)
+  Recall = TP/(TP+FN)
+  F1 = 2*(Precision*Recall)/(Precision + Recall)
+  return F1
+def F1_score(y_train, y_pred): F1_class = []
+classes = [i for i in range(10)] for classs in classes:
+true_lab = np.where(y_train==classs, 1, 0)
+pred_lab = np.where(y_pred==classs, 1, 0) F1_class.append(F1_score_each_class(true_lab,pred_lab))
+F1_average = np.mean(np.array(F1_class)) return F1_average
+Data pre-processing
+
+ transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+# train set
+train_val = torchvision.datasets.CIFAR10('./', train=True, download=True, transform=transform)
+train, val = torch.utils.data.random_split(train_val, [40000, 10000])
+train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=2) val_loader = torch.utils.data.DataLoader(val, batch_size=batch_size, shuffle=True, num_workers=2)
+# test set
+test = torchvision.datasets.CIFAR10('./', train=False, download=True,
+transform=transform)
+test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size_test, shuffle=True, num_workers=2)
+     Files already downloaded and verified
+     Files already downloaded and verified
+examples = enumerate(train_loader)
+batch_idx, (example_data, example_targets) = next(examples) example_data.shape
+torch.Size([128, 3, 32, 32])
+Hyperparameter selection steps
+criterion = torch.nn.CrossEntropyLoss()
+import copy
+learning_rates = [0.1, 0.01, 0.001]
+
+ dropouts = [0.2, 0.25, 0.5] best_HP_validation_accuracy = 0
+best_lr = 0
+bast_do = 0
+best_losslist = [] best_acc_list = [] Best_model = CNN_Net() for lr in learning_rates:
+for do in dropouts:
+HP_model = CNN_Net(do=do)
+optimizer = optim.SGD(HP_model.parameters(), lr=lr, momentum=0.9) scheduler = StepLR(optimizer, step_size=1, gamma=gamma) lost_list = []
+acc_list = []
+for epoch in range(1, epochs+1):
+HP_loss_list_per_epoch = CNN_train(HP_model, epoch)
+HP_validation_loss, HP_validation_accuracy, HP_val_target, HP_val_output = CNN_test(HP_model, val_loader) scheduler.step()
+lost_list.append(HP_validation_loss)
+acc_list.append(HP_validation_accuracy)
+if HP_validation_accuracy > best_HP_validation_accuracy:
+best_HP_validation_accuracy = HP_validation_accuracy best_lr = lr
+best_do = do
+best_losslist = lost_list
+best_acc_list = acc_list if save_model:
+print("model saved")
+best_model_wts = copy.deepcopy(HP_model.state_dict()) Best_model.load_state_dict(best_model_wts)
+print('learning rate: ' + str(lr) +', dropouts: ' + str(do) + ', and average loss: ' + str(sum(lost_list)/len(lo
+Train Epoch: 9 | Batch Status: 0/40000 (0%) | Loss: 0.601142
+Train Epoch: 9 | Batch Status: 25600/40000 (64%) | Loss: 0.513401
+Train Epoch: 9 | Test set: Average loss: 0.0059, Accuracy: 7387/10000 (74%)
+ st_
+l
+
+ Train Epoch: 10 | Batch Status: 0/40000 (0%) | Loss: 0.392836
+Train Epoch: 10 | Batch Status: 25600/40000 (64%) | Loss: 0.550724
+Train Epoch: 10 | Test set: Average loss: 0.0059, Accuracy: 7458/10000 (75%)
+Train Epoch: 11 | Batch Status: 0/40000 (0%) | Loss: 0.704105
+Train Epoch: 11 | Batch Status: 25600/40000 (64%) | Loss: 0.421801
+Train Epoch: 11 | Test set: Average loss: 0.0058, Accuracy: 7452/10000 (75%)
+Train Epoch: 12 | Batch Status: 0/40000 (0%) | Loss: 0.588326
+Train Epoch: 12 | Batch Status: 25600/40000 (64%) | Loss: 0.468882
+Train Epoch: 12 | Test set: Average loss: 0.0058, Accuracy: 7480/10000 (75%)
+Train Epoch: 13 | Batch Status: 0/40000 (0%) | Loss: 0.410752
+Train Epoch: 13 | Batch Status: 25600/40000 (64%) | Loss: 0.480705
+Train Epoch: 13 | Test set: Average loss: 0.0058, Accuracy: 7480/10000 (75%)
+Train Epoch: 14 | Batch Status: 0/40000 (0%) | Loss: 0.402880
+Train Epoch: 14 | Batch Status: 25600/40000 (64%) | Loss: 0.456554
+Train Epoch: 14 | Test set: Average loss: 0.0058, Accuracy: 7492/10000 (75%)
+model saved
+learning rate: 0.1, dropouts: 0.25, and average loss: 0.0069143129814948365, Train Epoch: 1 | Batch Status: 0/40000 (0%) | Loss: 2.305674
+Train Epoch: 1 | Batch Status: 25600/40000 (64%) | Loss: 1.660861
+Train Epoch: 1 | Test set: Average loss: 0.0128, Accuracy: 4045/10000 (40%)
+Train Epoch: 2 | Batch Status: 0/40000 (0%) | Loss: 1.729610
+Train Epoch: 2 | Batch Status: 25600/40000 (64%) | Loss: 1.537983
+Train Epoch: 2 | Test set: Average loss: 0.0104, Accuracy: 5308/10000 (53%)
+Train Epoch: 3 | Batch Status: 0/40000 (0%) | Loss: 1.295073
+Train Epoch: 3 | Batch Status: 25600/40000 (64%) | Loss: 1.413980
+Train Epoch: 3 | Test set: Average loss: 0.0091, Accuracy: 5943/10000 (59%)
+Train Epoch: 4 | Batch Status: 0/40000 (0%) | Loss: 1.139433
+Train Epoch: 4 | Batch Status: 25600/40000 (64%) | Loss: 1.174000
+Train Epoch: 4 | Test set: Average loss: 0.0082, Accuracy: 6278/10000 (63%)
+and average accuracy: tensor(69.413
+Train Epoch: 5 | Batch Status: 0/40000 (0%) | Loss: 1.113303
+6)
+
+ Train Epoch: 5 | Batch Status: 25600/40000 (64%) | Loss: 1.110005
+Train Epoch: 5 | Test set: Average loss: 0.0078, Accuracy: 6569/10000 (66%)
+Train Epoch: 6 | Batch Status: 0/40000 (0%) | Loss: 1.038396
+Train Epoch: 6 | Batch Status: 25600/40000 (64%) | Loss: 0.984628
+Train Epoch: 6 | Test set: Average loss: 0.0074, Accuracy: 6697/10000 (67%)
+Train Epoch: 7 | Batch Status: 0/40000 (0%) | Loss: 0.912031
+Train Epoch: 7 | Batch Status: 25600/40000 (64%) | Loss: 1.072469
+Train Epoch: 7 | Test set: Average loss: 0.0071, Accuracy: 6882/10000 (69%)
+Train Epoch: 8 | Batch Status: 0/40000 (0%) | Loss: 0.932400
+Train Epoch: 8 | Batch Status: 25600/40000 (64%) | Loss: 0.765114
+Train Epoch: 8 | Test set: Average loss: 0.0069, Accuracy: 6945/10000 (69%)
+Train Epoch: 9 | Batch Status: 0/40000 (0%) | Loss: 0.961322 Train Epoch: 9 | Batch Status: 25600/40000 (64%) | Loss: 0.841250
+
+ print('The best learning rate: ', best_lr)
+print("Thr best dropout ratio: ", best_do)
+plt.scatter(range(len(best_losslist)), best_losslist, label= 'validation loss' ) plt.scatter(range(len(best_acc_list)), best_acc_list, label='validation accuracy' ) plt.legend()
+plt.xlabel("Epoch")
+plt.title("Validation Loss and Validation Accuracy per Epoch for CNN with best hyperparameter")
+The best learning rate: 0.1
+Thr best dropout ratio: 0.25
+Text(0.5, 1.0, 'Validation Loss and Validation Accuracy per Epoch for CNN with best hyperparameter')
+CNN_test_loss, CNN_test_accuracy, CNN_test_target, CNN_test_output = CNN_test(Best_model, test_loader) Train Epoch: 14 | Test set: Average loss: 0.0007, Accuracy: 7494/10000 (75%)
+ 
+ CNN_test_target_l=[]
+for t in CNN_test_target:
+for item in t:
+target_item = item.item() CNN_test_target_l.append(target_item)
+CNN_test_target_l[:10]
+[7, 1, 2, 5, 4, 8, 7, 1, 7, 6]
+CNN_test_output_l=[]
+for t in CNN_test_output:
+for item in t:
+output_item = item.item() CNN_test_output_l.append(output_item)
+CNN_test_output_l[:10]
+[7, 1, 2, 5, 6, 6, 7, 1, 7, 6]
+
+       F1_score = F1_score(CNN_test_target_l, CNN_test_output_l) print(F1_score)
+---------------------------------------------------------------------------
+TypeError Traceback (most recent call last) <ipython-input-34-ab567726d25e> in <module>()
+----> 1 F1_score = F1_score(CNN_test_target_l, CNN_test_output_l)
+2 print(F1_score)
+1 frames
+<ipython-input-27-9cff216a3f4c> in F1_score_each_class(y_train, y_pred)
+  4
+5 ----> 6 7 8
+TN=0
+FN=0
+for ind in range(len(y_train)):
+if y_pred[ind] == y_train[ind] and y_train[ind] == 1 : TP += 1
+    TypeError: len() of unsized object
+Part 2: MLP
+          SEARCH STACK OVERFLOW
+    
+ from __future__ import print_function import matplotlib.pyplot as plt import numpy as np
+import torch
+import torchvision
+import torchvision.transforms as transforms import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
+# Training setting batch_size = 128 test_batch_size = 1000 epochs = 14
+lr = best_lr
+gamma = 0.7
+seed = 1
+log_interval = 200
+save_model = True
+use_cuda = torch.cuda.is_available() torch.manual_seed(seed)
+device = torch.device("cuda" if use_cuda else "cpu")
+
+ transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5 ,), (0.5,))])
+train_val = torchvision.datasets.CIFAR10('./', train=True, download=True, transform=transform) train, val = torch.utils.data.random_split(train_val, [40000, 10000])
+train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size, shuffle=True) val_loader = torch.utils.data.DataLoader(val, batch_size=test_batch_size, shuffle= True)
+test = torchvision.datasets.CIFAR10('./', train=False, download=True, transform=transform) test_loader = torch.utils.data.DataLoader(test, batch_size=test_batch_size, shuffle=True)
+class Feedforward(torch.nn.Module):
+def __init__(self, input_size, hidden_size, num_class):
+super(Feedforward, self).__init__()
+self.input_size = input_size
+self.hidden_size = hidden_size
+self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size) self.relu = torch.nn.ReLU()
+self.fc2 = torch.nn.Linear(self.hidden_size, num_class)
+def forward(self, x):
+hidden = self.fc1(x)
+relu = self.relu(hidden)
+output = self.fc2(relu)
+output = F.log_softmax(output, dim=1) return output
+model = Feedforward(32*32*3, 128, 10) model = model.to(device)
+optimizer = optim.Adadelta(model.parameters(), lr=lr) scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
+
+ def
+train(model, device, train_loader, optimizer, epoch, log_interval): model.train()
+loss_list_per_epoch = []
+i=1
+for batch_idx, (data, target) in enumerate(train_loader):
+data, target = data.to(device), target.to(device)
+x_train = data.view(data.size()[0],32*32*3)
+# set the gradients to zero to avoid unwanted gradient accumulation optimizer.zero_grad()
+# get model prediction
+y_pred = model(x_train) criterion = torch.nn.NLLLoss() loss = criterion(y_pred, target) # perform back propagation loss.backward()
+# update parameters optimizer.step()
+if batch_idx % log_interval == 0:
+print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format( i, batch_idx * len(data), len(train_loader.dataset),
+100. * batch_idx / len(train_loader), loss.item()))
+loss_list_per_epoch.append(loss.data) return loss_list_per_epoch
+
+ def
+test(model, device, test_loader): model.eval()
+test_loss = 0
+correct = 0
+with torch.no_grad():
+for data, target in test_loader:
+data, target = data.to(device), target.to(device)
+batch_size = data.size()[0] data = data.view(batch_size, -1) y_pred = model(data)
+criterion = torch.nn.NLLLoss()
+loss = criterion(y_pred, target)
+test_loss += loss
+#number of correct predictions
+correct += np.sum(np.array(np.argmax(y_pred.cpu(),axis=1))==np.array(target.cpu()))
+test_loss /= len(test_loader.dataset)
+print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+test_loss, correct, len(test_loader.dataset),
+100. * correct / len(test_loader.dataset)))
+return test_loss, 100. * correct / len(test_loader.dataset)
+
+ # Let's start training loss_list = [] val_accuracy_list = [] epochs = 5
+losss = []
+for epoch in range(1, epochs + 1):
+# train
+print("epoch:",epoch)
+loss_list_per_epoch = train(model, device, train_loader, optimizer, epoch, log_interval) # inference on validation set
+validation_loss, validation_accuracy = test(model, device, val_loader)
+scheduler.step()
+# log loss and accuracy
+loss_list += loss_list_per_epoch
+val_accuracy_list.append(validation_accuracy)
+losss.append(validation_loss)
+if save_model:
+torch.save(model.state_dict(), "cifar10_mlp.pt")
+#visualise training progress
+epochs = range(1,6)
+loss = losss
+accuracy = val_accuracy_list
+plt.plot(epochs,accuracy, color='blue',marker='o', label='Accuracy') plt.plot(epochs,loss, color='red',marker='o', label='Loss') plt.legend()
+plt.title("Loss function and accuracy through training") plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.show()
+
+ def
+test1(model, device, test_loader): model.eval()
+test_loss = 0
+correct = 0
+y_preds = []
+targets = []
+with torch.no_grad():
+for data, target in test_loader:
+data, target = data.to(device), target.to(device)
+batch_size = data.size()[0] data = data.view(batch_size, -1) y_pred = model(data)
+criterion = torch.nn.NLLLoss()
+loss = criterion(y_pred, target)
+test_loss += loss
+#number of correct predictions
+correct += np.sum(np.array(np.argmax(y_pred.cpu(),axis=1))==np.array(target.cpu())) y_preds.append(np.array(np.argmax(y_pred.cpu(),axis=1))) targets.append(np.array(target.cpu()))
+test_loss /= len(test_loader.dataset)
+print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+test_loss, correct, len(test_loader.dataset),
+100. * correct / len(test_loader.dataset)))
+return test_loss, 100. * correct / len(test_loader.dataset), y_preds, targets
+validation_loss, validation_accuracy, y_pred, y_test = test1(model, device, test_loader)
+
+ pred,test = np.stack(y_pred, axis=0),np.stack(y_test, axis=0) a = pred.reshape(10000,)
+b = test.reshape(10000,)
+F1_score = F1_score(b,a) print(F1_score)
+ 
